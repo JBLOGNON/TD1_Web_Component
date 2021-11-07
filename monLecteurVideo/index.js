@@ -7,6 +7,7 @@ const getBaseURL = () => {
 const AudioContext = window.AudioContext || window.webkitAudioContext;
 
 var pannerNode;
+var source;
 
 let style = `
 <style>
@@ -155,7 +156,44 @@ let template = /*html*/`
   </div>
 
   <div>
+    <label for="pannerSlider">Balance</label>
     <input type="range" min="-1" max="1" step="0.1" value="0" id="pannerSlider" />
+  </div>
+
+  <div class="controls">
+    <label>60Hz</label>
+    <input type="range" value="0" step="1" min="-30" max="30" id="gain60"></input>
+    <output id="gain0">0 dB</output>
+  </div>
+
+  <div class="controls">
+    <label>170Hz</label>
+    <input type="range" value="0" step="1" min="-30" max="30" id="gain170"></input>
+    <output id="gain1">0 dB</output>
+  </div>
+
+  <div class="controls">
+    <label>350Hz</label>
+    <input type="range" value="0" step="1" min="-30" max="30" id="gain350"></input>
+    <output id="gain2">0 dB</output>
+  </div>
+
+  <div class="controls">
+    <label>1000Hz</label>
+    <input type="range" value="0" step="1" min="-30" max="30" id="gain1000"></input>
+    <output id="gain3">0 dB</output>
+  </div>
+
+  <div class="controls">
+    <label>3500Hz</label>
+    <input type="range" value="0" step="1" min="-30" max="30" id="gain3500"></input>
+    <output id="gain4">0 dB</output>
+  </div>
+
+  <div class="controls">
+    <label>10000Hz</label>
+    <input type="range" value="0" step="1" min="-30" max="30" id="gain10000"></input>
+    <output id="gain5">0 dB</output>
   </div>
 
   <div class="hover_bkgr_fricc">
@@ -190,22 +228,39 @@ class MyVideoPlayer extends HTMLElement {
 
      this.fixeRelativeURL();
 
-    
-
      this.player = this.shadowRoot.querySelector("#player");
      this.player.src = this.getAttribute("src");
 
      this.audioContext = new AudioContext();
+     
 
      const interval = setInterval(() => {
         if (this.player) {
-            this.player.onplay = (e) => { this.audioContext.resume(); }
-
+            this.player.onplay = (e) => { 
+                this.audioContext.resume(); 
+            }
             clearInterval(interval);
         }
      }, 500);
 
      this.buildAudioGraphPanner();
+
+     //var sourceNode = this.audioContext.createMediaElementSource(this.player);
+     this.filters = [];
+     [60, 170, 350, 1000, 3500, 10000].forEach((freq, i) => {
+        var eq = this.audioContext.createBiquadFilter();
+        eq.frequency.value = freq;
+        eq.type = "peaking";
+        eq.gain.value = 0;
+        this.filters.push(eq);
+      });
+
+     source.connect(this.filters[0]);
+     for(var i = 0; i < this.filters.length - 1; i++) {
+        this.filters[i].connect(this.filters[i+1]);
+     }
+
+     this.filters[this.filters.length - 1].connect(this.audioContext.destination);
 
      this.shadowRoot.querySelector('.timeBar').style.width = "0";
 
@@ -215,7 +270,7 @@ class MyVideoPlayer extends HTMLElement {
 
     buildAudioGraphPanner() {
         // create source and gain node
-        var source = this.audioContext.createMediaElementSource(this.player);
+        source = this.audioContext.createMediaElementSource(this.player);
         pannerNode = this.audioContext.createStereoPanner();
       
         // connect nodes together
@@ -309,6 +364,30 @@ class MyVideoPlayer extends HTMLElement {
             const vol = parseFloat(event.target.value);
             this.volume(vol);
         }
+
+        this.shadowRoot.querySelector('#gain60').oninput = (event) => {
+            this.changeGain(event.target.value, 0);
+        }
+
+        this.shadowRoot.querySelector('#gain170').oninput = (event) => {
+            this.changeGain(event.target.value, 1);
+        }
+
+        this.shadowRoot.querySelector('#gain350').oninput = (event) => {
+            this.changeGain(event.target.value, 2);
+        }
+
+        this.shadowRoot.querySelector('#gain1000').oninput = (event) => {
+            this.changeGain(event.target.value, 3);
+        }
+
+        this.shadowRoot.querySelector('#gain3500').oninput = (event) => {
+            this.changeGain(event.target.value, 4);
+        }
+
+        this.shadowRoot.querySelector('#gain10000').oninput = (event) => {
+            this.changeGain(event.target.value, 5);
+        }
     }
   
     // API de mon composant
@@ -389,6 +468,15 @@ class MyVideoPlayer extends HTMLElement {
     volume(vol) {
         this.player.volume = vol;
     }
+
+    changeGain(sliderVal,nbFilter) {
+        var value = parseFloat(sliderVal);
+        this.filters[nbFilter].gain.value = value;
+        
+        // update output labels
+        var output = this.shadowRoot.querySelector("#gain"+nbFilter);
+        output.value = value + " dB";
+      }
   }
   
   customElements.define("my-player", MyVideoPlayer);
