@@ -8,6 +8,7 @@ const AudioContext = window.AudioContext || window.webkitAudioContext;
 
 var pannerNode;
 var source;
+var width, height;
 
 let style = `
 <style>
@@ -124,6 +125,19 @@ let style = `
         background-color: #ccc;
     }
 
+    #audio-buttons {
+        background-color: lightgrey;
+        width: 1274px;
+        padding-bottom: 15px;
+        border: 3px solid grey;
+        display: flex;
+        justify-content: center;
+    }
+
+    #audio-buttons webaudio-knob {
+        margin: 0 auto;
+    }
+
 </style>`;
 
 let template = /*html*/`
@@ -155,46 +169,24 @@ let template = /*html*/`
     <button id="info" class="fa fa-info-circle"></button>
   </div>
 
-  <div>
-    <label for="pannerSlider">Balance</label>
-    <input type="range" min="-1" max="1" step="0.1" value="0" id="pannerSlider" />
+  <div id="audio-buttons">
+    <webaudio-knob id="pannerSlider" min=-1 max=1 value=0 step="0.1" 
+            tooltip="%s" diameter="50" src="./assets/Carbon.png" sprites="100">Balance</webaudio-knob>
+    <webaudio-knob id="gain60" min=-30 max=30 value=0 step="1" 
+            tooltip="%s" diameter="50" src="./assets/Carbon.png" sprites="100">60Hz</webaudio-knob>
+    <webaudio-knob id="gain170" min=-30 max=30 value=0 step="1" 
+            tooltip="%s" diameter="50" src="./assets/Carbon.png" sprites="100">170Hz</webaudio-knob>
+    <webaudio-knob id="gain350" min=-30 max=30 value=0 step="1" 
+            tooltip="%s" diameter="50" src="./assets/Carbon.png" sprites="100">350Hz</webaudio-knob>
+    <webaudio-knob id="gain1000" min=-30 max=30 value=0 step="1" 
+            tooltip="%s" diameter="50" src="./assets/Carbon.png" sprites="100">1000Hz</webaudio-knob>
+    <webaudio-knob id="gain3500" min=-30 max=30 value=0 step="1" 
+            tooltip="%s" diameter="50" src="./assets/Carbon.png" sprites="100">3500Hz</webaudio-knob>
+    <webaudio-knob id="gain10000" min=-30 max=30 value=0 step="1" 
+            tooltip="%s" diameter="50" src="./assets/Carbon.png" sprites="100">10000Hz</webaudio-knob>
   </div>
 
-  <div class="controls">
-    <label>60Hz</label>
-    <input type="range" value="0" step="1" min="-30" max="30" id="gain60"></input>
-    <output id="gain0">0 dB</output>
-  </div>
-
-  <div class="controls">
-    <label>170Hz</label>
-    <input type="range" value="0" step="1" min="-30" max="30" id="gain170"></input>
-    <output id="gain1">0 dB</output>
-  </div>
-
-  <div class="controls">
-    <label>350Hz</label>
-    <input type="range" value="0" step="1" min="-30" max="30" id="gain350"></input>
-    <output id="gain2">0 dB</output>
-  </div>
-
-  <div class="controls">
-    <label>1000Hz</label>
-    <input type="range" value="0" step="1" min="-30" max="30" id="gain1000"></input>
-    <output id="gain3">0 dB</output>
-  </div>
-
-  <div class="controls">
-    <label>3500Hz</label>
-    <input type="range" value="0" step="1" min="-30" max="30" id="gain3500"></input>
-    <output id="gain4">0 dB</output>
-  </div>
-
-  <div class="controls">
-    <label>10000Hz</label>
-    <input type="range" value="0" step="1" min="-30" max="30" id="gain10000"></input>
-    <output id="gain5">0 dB</output>
-  </div>
+  <canvas id="myCanvas" width=300 height=100></canvas>
 
   <div class="hover_bkgr_fricc">
     <span class="helper"></span>
@@ -218,7 +210,6 @@ class MyVideoPlayer extends HTMLElement {
             let path = e.getAttribute('src');
             e.src = getBaseURL() + '/' + path;
         });
-
     }
   
     connectedCallback() {
@@ -229,11 +220,16 @@ class MyVideoPlayer extends HTMLElement {
      this.fixeRelativeURL();
 
      this.player = this.shadowRoot.querySelector("#player");
+     this.canvas = this.shadowRoot.querySelector("#myCanvas");
+
      this.player.src = this.getAttribute("src");
 
-     this.audioContext = new AudioContext();
-     
+     width = this.canvas.width;
+     height = this.canvas.height;
 
+     this.audioContext = new AudioContext();
+     this.canvasContext = this.canvas.getContext('2d');
+     
      const interval = setInterval(() => {
         if (this.player) {
             this.player.onplay = (e) => { 
@@ -245,7 +241,6 @@ class MyVideoPlayer extends HTMLElement {
 
      this.buildAudioGraphPanner();
 
-     //var sourceNode = this.audioContext.createMediaElementSource(this.player);
      this.filters = [];
      [60, 170, 350, 1000, 3500, 10000].forEach((freq, i) => {
         var eq = this.audioContext.createBiquadFilter();
@@ -266,12 +261,22 @@ class MyVideoPlayer extends HTMLElement {
 
      // déclarer les écouteurs sur les boutons
      this.definitEcouteurs();
+
+     //requestAnimationFrame(() => this.visualize2());
     }
 
     buildAudioGraphPanner() {
         // create source and gain node
         source = this.audioContext.createMediaElementSource(this.player);
         pannerNode = this.audioContext.createStereoPanner();
+
+        // Create an analyser node
+        this.analyser = this.audioContext.createAnalyser();
+        
+        // Try changing for lower values: 512, 256, 128, 64...
+        this.analyser.fftSize = 512;
+        this.bufferLength = this.analyser.frequencyBinCount;
+        this.dataArray = new Uint8Array(this.bufferLength);
       
         // connect nodes together
         source.connect(pannerNode);
@@ -280,8 +285,6 @@ class MyVideoPlayer extends HTMLElement {
     }
 
     definitEcouteurs() {
-        console.log("ecouteurs définis")
-
         var isVideoPlaying = false;
         var timeDrag = false;
         var videoSpeed = 1;
@@ -388,6 +391,21 @@ class MyVideoPlayer extends HTMLElement {
         this.shadowRoot.querySelector('#gain10000').oninput = (event) => {
             this.changeGain(event.target.value, 5);
         }
+
+        window.onkeyup = (e) => {
+            if (e.keyCode == 32) {
+                this.play();
+            }
+            if (e.keyCode == 77) {
+                this.volume(0);
+            }
+            if (e.keyCode == 39) {
+                this.avance10s();
+            }
+            if (e.keyCode == 37) {
+                this.recule10s();
+            }
+        }
     }
   
     // API de mon composant
@@ -472,12 +490,41 @@ class MyVideoPlayer extends HTMLElement {
     changeGain(sliderVal,nbFilter) {
         var value = parseFloat(sliderVal);
         this.filters[nbFilter].gain.value = value;
+    }
+
+    visualize2() {
+        this.canvasContext = this.canvas.getContext('2d');
+        this.canvasContext.save();
+        this.canvasContext.fillStyle = "rgba(0, 0, 0, 0.05)";
+        this.canvasContext.fillRect (0, 0, width, height);
+    
+        this.analyser.getByteFrequencyData(this.dataArray);
+        var nbFreq = this.dataArray.length;
         
-        // update output labels
-        var output = this.shadowRoot.querySelector("#gain"+nbFilter);
-        output.value = value + " dB";
-      }
+        var SPACER_WIDTH = 5;
+        var BAR_WIDTH = 2;
+        var OFFSET = 100;
+        var CUTOFF = 23;
+        var HALF_HEIGHT = height;
+        var numBars = 1.7*Math.round(width / SPACER_WIDTH);
+        var magnitude;
+      
+        this.canvasContext.lineCap = 'round';
+    
+        for (var i = 0; i < numBars; ++i) {
+           magnitude = 0.3*this.dataArray[Math.round((i * nbFreq) / numBars)];
+           this.canvasContext.fillStyle = "hsl( " + Math.round((i*360)/numBars) + ", 100%, 50%)";
+           this.canvasContext.fillRect(i * SPACER_WIDTH, HALF_HEIGHT, BAR_WIDTH, -magnitude);
+        }
+        
+        this.canvasContext.stroke();
+        
+        this.canvasContext.restore();
+      
+        requestAnimationFrame(() => this.visualize2());
+    }
   }
+
   
   customElements.define("my-player", MyVideoPlayer);
   
