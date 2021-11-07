@@ -4,14 +4,19 @@ const getBaseURL = () => {
 	return new URL('.', import.meta.url);
 };
 
+const AudioContext = window.AudioContext || window.webkitAudioContext;
+
+var pannerNode;
+
 let style = `
 <style>
     #controls {
         background-color: lightgrey;
         display: table;
+        width: 1280px;
     }
 
-    #play, #avance10, #recule10 {
+    #play, #avance10, #recule10, #speed, #info {
         background-color: transparent;
         background-repeat: no-repeat;
         border: none;
@@ -20,6 +25,10 @@ let style = `
         font-size: 30px;
         padding-top: 7px;
         padding-bottom: 7px;
+    }
+
+    #info {
+        margin-left: 15px;
     }
 
     #time{
@@ -32,14 +41,14 @@ let style = `
     }
 
     .progress-bar {
-        padding: 7.5px;
+        padding: 20px;
         border-left: none;
         box-shadow: inset 0 0 1px rgba(255,255,255,0.5);
         float:left;
     }
 
     .progress {
-        width:950px;
+        width:920px;
         height:7px;
         position:relative;
         cursor:pointer;
@@ -59,22 +68,67 @@ let style = `
 
     .timeBar{
         z-index:10;
+        
         background: -webkit-linear-gradient(top, rgba(107,204,226,1) 0%,rgba(29,163,208,1) 100%);
         box-shadow: 0 0 7px rgba(107,204,226,.5);
     }
 
-    .timeBarWidth {
-        width: 0;
+    .hover_bkgr_fricc{
+        background:rgba(0,0,0,.4);
+        cursor:pointer;
+        display:none;
+        height:100%;
+        position:fixed;
+        text-align:center;
+        top:0;
+        width:100%;
+        z-index:10000;
+    }
+    .hover_bkgr_fricc .helper{
+        display:inline-block;
+        height:100%;
+        vertical-align:middle;
+    }
+    .hover_bkgr_fricc > div {
+        background-color: #fff;
+        box-shadow: 10px 10px 60px #555;
+        display: inline-block;
+        height: auto;
+        max-width: 551px;
+        min-height: 100px;
+        vertical-align: middle;
+        width: 60%;
+        position: relative;
+        border-radius: 8px;
+        padding: 15px 5%;
+    }
+    .popupCloseButton {
+        background-color: #fff;
+        border: 3px solid #999;
+        border-radius: 50px;
+        cursor: pointer;
+        display: inline-block;
+        font-family: arial;
+        font-weight: bold;
+        position: absolute;
+        top: -20px;
+        right: -20px;
+        font-size: 25px;
+        line-height: 30px;
+        width: 30px;
+        height: 30px;
+        text-align: center;
+    }
+    .popupCloseButton:hover {
+        background-color: #ccc;
     }
 
 </style>`;
 
 let template = /*html*/`
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
   
-  <video id="player">
+  <video id="player" crossorigin="anonymous">
       <br>
   </video>
 
@@ -85,6 +139,9 @@ let template = /*html*/`
     <button id="recule10" class="fa fa-undo"></button>
     <button id="avance10" class="fa fa-repeat"></button>
 
+    <webaudio-knob id="volume" min=0 max=1 value=0.5 step="0.01" 
+            tooltip="%s" diameter="30" src="./assets/Vintage_Knob.png" sprites="100"></webaudio-knob>
+
     <span id="time">00:00</span>
 
     <div class="progress-bar">
@@ -93,14 +150,21 @@ let template = /*html*/`
         </div>
     </div>
 
+    <button id="speed" class="fa fa-step-forward"></button>
+    <button id="info" class="fa fa-info-circle"></button>
   </div>
 
-  
-  <button id="info">GET INFO</button>
-  
-  <button id="vitesse4" >Vitesse 4x</button>
-  <webaudio-knob id="volume" min=0 max=1 value=0.5 step="0.01" 
-         tooltip="%s" diameter="20" src="./assets/Vintage_Knob.png" sprites="100"></webaudio-knob>`;
+  <div>
+    <input type="range" min="-1" max="1" step="0.1" value="0" id="pannerSlider" />
+  </div>
+
+  <div class="hover_bkgr_fricc">
+    <span class="helper"></span>
+    <div>
+        <div class="popupCloseButton">&times;</div>
+        <p id="description">Add any HTML content<br />inside the popup box!</p>
+    </div>
+  </div>`;
 
 class MyVideoPlayer extends HTMLElement {
     constructor() {
@@ -126,11 +190,38 @@ class MyVideoPlayer extends HTMLElement {
 
      this.fixeRelativeURL();
 
+    
+
      this.player = this.shadowRoot.querySelector("#player");
      this.player.src = this.getAttribute("src");
 
+     this.audioContext = new AudioContext();
+
+     const interval = setInterval(() => {
+        if (this.player) {
+            this.player.onplay = (e) => { this.audioContext.resume(); }
+
+            clearInterval(interval);
+        }
+     }, 500);
+
+     this.buildAudioGraphPanner();
+
+     this.shadowRoot.querySelector('.timeBar').style.width = "0";
+
      // déclarer les écouteurs sur les boutons
      this.definitEcouteurs();
+    }
+
+    buildAudioGraphPanner() {
+        // create source and gain node
+        var source = this.audioContext.createMediaElementSource(this.player);
+        pannerNode = this.audioContext.createStereoPanner();
+      
+        // connect nodes together
+        source.connect(pannerNode);
+        pannerNode.connect(this.audioContext.destination);
+    
     }
 
     definitEcouteurs() {
@@ -138,6 +229,7 @@ class MyVideoPlayer extends HTMLElement {
 
         var isVideoPlaying = false;
         var timeDrag = false;
+        var videoSpeed = 1;
 
         this.shadowRoot.querySelector("#play").onclick = () => {
             if (isVideoPlaying == false) {
@@ -165,7 +257,6 @@ class MyVideoPlayer extends HTMLElement {
             this.updateTime();
         }
 
-        //Progress Bar
         this.shadowRoot.querySelector('.progress').onmousedown = (e) => {
             timeDrag = true;
             this.updatebar(e.pageX);
@@ -184,17 +275,40 @@ class MyVideoPlayer extends HTMLElement {
             }
         }
 
-        this.shadowRoot.querySelector("#vitesse4").onclick = () => {
-            this.vitesse4x();
+        this.shadowRoot.querySelector("#speed").onclick = () => {
+            if (videoSpeed == 1) {
+                this.speed(2);
+                this.shadowRoot.querySelector("#speed").classList.remove('fa-step-forward');
+                this.shadowRoot.querySelector("#speed").classList.add('fa-forward');
+                videoSpeed = 2;
+            } else if (videoSpeed == 2) {
+                this.speed(4);
+                this.shadowRoot.querySelector("#speed").classList.remove('fa-forward');
+                this.shadowRoot.querySelector("#speed").classList.add('fa-fast-forward');
+                videoSpeed = 3;                
+            } else {
+                this.speed(1);
+                this.shadowRoot.querySelector("#speed").classList.remove('fa-fast-forward');
+                this.shadowRoot.querySelector("#speed").classList.add('fa-step-forward');
+                videoSpeed = 1;
+            }
         }
 
         this.shadowRoot.querySelector("#info").onclick = () => {
             this.getInfo();
         }
-        /*this.shadowRoot.querySelector("#volume").oninput = (event) => {
+
+        this.shadowRoot.querySelector('#pannerSlider').oninput = (event) => {
+            pannerNode.pan.value = event.target.value;
+        }
+
+        this.shadowRoot.querySelector('.popupCloseButton').onclick = () => {
+            this.shadowRoot.querySelector('.hover_bkgr_fricc').style.display = 'none';
+        }
+        this.shadowRoot.querySelector("#volume").oninput = (event) => {
             const vol = parseFloat(event.target.value);
-            this.player.volume = vol;
-        }*/
+            this.volume(vol);
+        }
     }
   
     // API de mon composant
@@ -240,8 +354,8 @@ class MyVideoPlayer extends HTMLElement {
         let mediaTime = minuteValue + ':' + secondValue;
         this.shadowRoot.querySelector("#time").textContent = mediaTime;
 
-        //let barLength = timerWrapper.clientWidth * (media.currentTime/media.duration);
-        //timerBar.style.width = barLength + 'px';
+        var progressBarLenght = this.shadowRoot.querySelector('.progress').offsetWidth;
+        this.shadowRoot.querySelector('.timeBar').style.width = ( (this.player.currentTime * progressBarLenght) / this.player.duration) + 'px'; 
     }
 
     updatebar(x) {
@@ -256,21 +370,24 @@ class MyVideoPlayer extends HTMLElement {
 			percentage = 0;
 		}
 
-        var sheet = new CSSStyleSheet;
-        sheet.replaceSync( `.timeBarWidth { width: ` + percentage + `%;}`);
-        this.shadowRoot.adoptedStyleSheets = [ sheet ];
-
-		//this.shadowRoot.querySelector('.timeBar').css('width',percentage+'%'); 	
+		this.shadowRoot.querySelector('.timeBar').style.width = percentage + '%'; 	
 		this.player.currentTime = maxduration * percentage / 100;
 	}
 
-    vitesse4x() {
-        this.player.playbackRate = 4;
+    speed(newSpeed) {
+        this.player.playbackRate = newSpeed;
     }
 
     getInfo() {
         console.log("Durée de la vidéo : " + this.player.duration);
         console.log("Temps courant : " + this.player.currentTime);
+        this.shadowRoot.querySelector("#description").innerHTML = "Durée de la vidéo : " + this.player.duration + ", " + 
+        "Temps courant : " + this.player.currentTime;
+        this.shadowRoot.querySelector('.hover_bkgr_fricc').style.display = 'block';
+    }
+
+    volume(vol) {
+        this.player.volume = vol;
     }
   }
   
